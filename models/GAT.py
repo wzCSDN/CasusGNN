@@ -84,7 +84,6 @@ class GAT(torch.nn.Module):
                 Linear(hidden_channels, hidden_channels)
             )
 
-            # 5. 因果表示的分类头
             self.causal_predictor = Linear(hidden_channels, out_channels)
         print(f"learnable_params: {sum(p.numel() for p in list(self.parameters()) if p.requires_grad)}")
 
@@ -168,12 +167,8 @@ class GAT(torch.nn.Module):
         if not self.training or not self.use_causal_reg:
             return y_main_logits, None
 
-        # 1. 确定原始特征输入 x_src
         x_src = x[0] if isinstance(x, tuple) else x
-        # 2. 计算纯净特征 h_x
         h_x = self.mlp_x(x_src)
-
-        # 3. 计算环境摘要 h_e (运行独立的 GNN_env)
         h_e = x
         if not self.saint:  # Neighbor Sampler
             for i in range(self.num_layers):
@@ -186,22 +181,15 @@ class GAT(torch.nn.Module):
                 h_e = layer(h_e, adjs)
                 if i < self.num_layers - 1:
                     h_e = self.non_linearity(h_e)
-
-        # 4. 聚类：使用向量内积进行软分配
         h_e_norm = F.normalize(h_e, p=2, dim=1, eps=1e-12)
         prototypes_norm = F.normalize(self.env_prototypes, p=2, dim=1, eps=1e-12)
         scores = h_e_norm @ prototypes_norm.t()
         temperature = 0.1
-
-        # d. Calculate the soft assignment probabilities. This step is now safe from overflow.
         q = F.softmax(scores / temperature, dim=1)
 
-        # 5. 计算边际概率 p (在当前batch的输出节点上计算)
         p = q.mean(dim=0)
 
-        # 6. 从h_x中抽取出与最终输出对应的部分
         num_batch_nodes = y_main_logits.size(0)
-        # NeighborLoader保证目标节点在输入x_src的前面
         h_x_batch = h_x[:num_batch_nodes]
 
 
