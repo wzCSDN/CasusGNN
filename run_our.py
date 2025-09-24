@@ -12,16 +12,15 @@ from utils.edge_noise import add_edge_noise
 import random
 
 
-# === 安全补丁：允许 torch.load 加载 PyG 的 DataEdgeAttr ===
+
 import torch
 import torch_geometric.data.data
 from torch.serialization import safe_globals
 
-# 保存原始 torch.load
+
 _original_torch_load = torch.load
 
 def patched_torch_load(f, *args, **kwargs):
-    # 检查是否是 PyG 的数据文件（包含 DataEdgeAttr）
     try:
         with safe_globals([torch_geometric.data.data.DataEdgeAttr]):
             return _original_torch_load(f, *args, **kwargs)
@@ -31,43 +30,8 @@ def patched_torch_load(f, *args, **kwargs):
         kwargs['weights_only'] = False
         return _original_torch_load(f, *args, **kwargs)
 
-# 打补丁
+
 torch.load = patched_torch_load
-# =========================================================
-
-
-# def train(model, data, loader, optimizer, device, epoch):
-#     model.train()
-#
-#     total_loss = 0
-#     if type(loader) is GraphSAINTRandomWalkSampler:
-#         for data in tqdm(loader, leave=False, desc=f"Epcoh {epoch}", dynamic_ncols=True):
-#             data = data.to(device)
-#             optimizer.zero_grad()
-#             out = model(data.x, data.edge_index)
-#             y = data.y.squeeze(1)
-#             loss = F.cross_entropy(out[data.train_mask], y[data.train_mask])
-#             loss.backward()
-#             optimizer.step()
-#             total_loss += loss.item()
-#
-#         return total_loss / len(loader)
-#     else:
-#         for batch_size, n_id, adjs in tqdm(loader, leave=False, desc=f"Epcoh {epoch}", dynamic_ncols=True):
-#             # `adjs` holds a list of `(edge_index, e_id, size)` tuples.
-#             adjs = [adj.to(device) for adj in adjs]
-#             x = data.x[n_id].to(device)
-#             y = data.y[n_id[:batch_size]].squeeze().to(device)
-# #每个batch:20000
-#             optimizer.zero_grad()
-#             out = model(x, adjs)
-#             loss = F.cross_entropy(out, y)
-#             loss.backward()
-#             optimizer.step()
-#
-#             total_loss += float(loss)
-#     return total_loss / len(loader)
-
 
 def train(model, data, loader, optimizer, device, epoch):
     model.train()
@@ -86,13 +50,7 @@ def train(model, data, loader, optimizer, device, epoch):
             # 模型返回两个输出
             y_main_logits, y_causal_logits = model(data.x, data.edge_index)
             y = data.y.squeeze()
-
-            # --- 计算损失 ---
-            # 1. 主分类损失
             loss_main = F.cross_entropy(y_main_logits[data.train_mask], y[data.train_mask])
-
-            # 2. 因果正则损失 (KL散度)
-            # 确保只对训练节点计算正则损失
             if y_causal_logits is not None:
                 loss_reg_causal = F.kl_div(
                     F.log_softmax(y_main_logits[data.train_mask], dim=-1),
@@ -114,7 +72,6 @@ def train(model, data, loader, optimizer, device, epoch):
 
         return total_loss_sum / len(loader), main_loss_sum / len(loader), reg_loss_sum / len(loader)
     else:
-        # 适用于邻居采样器 (NeighborLoader)
         for batch_size, n_id, adjs in tqdm(loader, leave=False, desc=f"Epcoh {epoch}", dynamic_ncols=True):
             adjs = [adj.to(device) for adj in adjs]
             x = data.x[n_id].to(device)
@@ -122,14 +79,10 @@ def train(model, data, loader, optimizer, device, epoch):
 
             optimizer.zero_grad()
 
-            # 模型返回两个输出
             y_main_logits, y_causal_logits = model(x, adjs)
 
-            # --- 计算损失 ---
-            # 1. 主分类损失
             loss_main = F.cross_entropy(y_main_logits, y)
 
-            # 2. 因果正则损失 (KL散度)
             if y_causal_logits is not None:
                 loss_reg_causal = F.kl_div(
                     F.log_softmax(y_main_logits, dim=-1),
@@ -139,7 +92,6 @@ def train(model, data, loader, optimizer, device, epoch):
             else:
                 loss_reg_causal = torch.tensor(0.0, device=device)
 
-            # 3. 总损失
             total_loss = loss_main + reg_lambda * loss_reg_causal
 
             total_loss.backward()
